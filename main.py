@@ -22,6 +22,8 @@ exchange.has['fetchCurrencies'] = False
 exchange.fetch_currencies = lambda *a, **k: {}
 
 def set_lev(sym):
+    try: exchange.set_position_mode(True) # FIX biar gak batch-orders error
+    except: pass
     try:
         exchange.set_leverage(LEV, sym, {'mgnMode': 'isolated', 'posSide': 'long'})
         exchange.set_leverage(LEV, sym, {'mgnMode': 'isolated', 'posSide': 'short'})
@@ -45,7 +47,9 @@ while True:
             price, e20, e50, pe20, pe50 = get_signal(sym)
             name = sym.split('/')[0]
             side_now = pos.get(name)
-            qty = (MARGIN*LEV)/price
+            # FIX 1: qty dibulatin, OKX gak mau koma
+            qty = round((MARGIN*LEV)/price)
+            if qty < 1: qty = 1
 
             if e20>e50 and pe20<=pe50:
                 if side_now != 'long':
@@ -68,4 +72,6 @@ while True:
                     pos[name]='short'
         except Exception as e:
             print(f"[ERR] {sym}: {e}", flush=True)
+            try: print(f"DETAIL: {exchange.last_json}", flush=True)
+            except: pass
     time.sleep(60)
