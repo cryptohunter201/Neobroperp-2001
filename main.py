@@ -13,7 +13,10 @@ exchange = ccxt.okx({
     'secret': API_SECRET,
     'password': PASSPHRASE,
     'enableRateLimit': True,
-    'options': {'defaultType': 'swap'}
+    'options': {
+        'defaultType': 'swap',
+        'fetchCurrencies': False,
+    },
 })
 
 def set_lev(sym):
