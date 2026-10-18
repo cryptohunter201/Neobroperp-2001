@@ -18,7 +18,8 @@ exchange = ccxt.okx({
         'fetchCurrencies': False,
     },
 })
-
+exchange.has['fetchCurrencies'] = False
+exchange.fetch_currencies = lambda *a, **k: {}
 def set_lev(sym):
     try:
         exchange.set_leverage(LEV, sym, {'mgnMode': 'isolated', 'posSide': 'long'})
