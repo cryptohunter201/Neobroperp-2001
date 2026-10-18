@@ -20,6 +20,7 @@ exchange = ccxt.okx({
 })
 exchange.has['fetchCurrencies'] = False
 exchange.fetch_currencies = lambda *a, **k: {}
+
 def set_lev(sym):
     try:
         exchange.set_leverage(LEV, sym, {'mgnMode': 'isolated', 'posSide': 'long'})
@@ -66,5 +67,5 @@ while True:
                     exchange.create_market_order(sym, 'sell', qty, None, {'tdMode':'isolated','posSide':'short'})
                     pos[name]='short'
         except Exception as e:
-    print(f"[ERR] {sym}: {e}"), flush=True)
+            print(f"[ERR] {sym}: {e}", flush=True)
     time.sleep(60)
