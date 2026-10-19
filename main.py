@@ -1,123 +1,170 @@
-import os, time, ccxt, requests, traceback, hmac, base64, hashlib, json
-from datetime import datetime, timezone
+import os, time, ccxt, requests
 
-MARGIN = 5.0
-LEV = 8
-SYMBOLS = ["LIT/USDT:USDT","ONDO/USDT:USDT","SUI/USDT:USDT","ASTER/USDT:USDT","SOL/USDT:USDT"]
+# ============ KONFIG ============
+MARGIN  = 5.0
+LEV     = 8
+MAX_DAILY_LOSS = -20
+SYMBOLS = ["LIT/USDT:USDT","ONDO/USDT:USDT","SUI/USDT:USDT","SOL/USDT:USDT"]
 
-API_KEY = (os.getenv("OKX_API_KEY") or "").strip()
-API_SECRET = (os.getenv("OKX_API_SECRET") or "").strip()
-PASSPHRASE = (os.getenv("OKX_PASSPHRASE") or "").strip()
-FONNTE_TOKEN = (os.getenv("FONNTE_TOKEN") or "").strip()
-WA_TARGET = (os.getenv("WA_TARGET") or "").strip()
+def clean(v): return (v or "").strip().replace("\n","").replace("\r","").strip()
 
-def send_wa(msg):
-    if not FONNTE_TOKEN or not WA_TARGET: return
-    try: requests.post("https://api.fonnte.com/send", headers={"Authorization": FONNTE_TOKEN}, data={"target": WA_TARGET, "message": msg}, timeout=10)
-    except: pass
+API_KEY      = clean(os.getenv("OKX_API_KEY"))
+API_SECRET   = clean(os.getenv("OKX_API_SECRET"))
+PASSPHRASE   = clean(os.getenv("OKX_PASSPHRASE"))
+FONNTE_TOKEN = clean(os.getenv("FONNTE_TOKEN"))
+WA_TARGET    = clean(os.getenv("WA_TARGET") or os.getenv("FONNTE_TARGET"))
 
-# === FUNGSI CEK SALDO LANGSUNG KE OKX (ANTI CCXT ERROR) ===
-def get_okx_balance_direct():
+# ============ NOTIF ============
+def send_wa(pesan):
+    if not FONNTE_TOKEN or not WA_TARGET: 
+        print(f"[WA SKIP] {pesan}", flush=True); return
     try:
-        method = "GET"
-        request_path = "/api/v5/account/balance"
-        body = ""
-        timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        # OKX butuh format 2025-10-19T07:00:00.000Z
-        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
-        message = timestamp + method + request_path + body
-        mac = hmac.new(API_SECRET.encode('utf-8'), message.encode('utf-8'), hashlib.sha256)
-        sign = base64.b64encode(mac.digest()).decode('utf-8')
-        
-        headers = {
-            "OK-ACCESS-KEY": API_KEY,
-            "OK-ACCESS-SIGN": sign,
-            "OK-ACCESS-TIMESTAMP": timestamp,
-            "OK-ACCESS-PASSPHRASE": PASSPHRASE,
-            "Content-Type": "application/json"
-        }
-        print(f"DEBUG KEY:{API_KEY[:5]}... PASS LEN:{len(PASSPHRASE)}", flush=True)
-        r = requests.get(f"https://www.okx.com{request_path}", headers=headers, timeout=10)
-        print(f"OKX RAW: {r.status_code} {r.text[:300]}", flush=True)
-        data = r.json()
-        if data.get('code') == '0':
-            eq = data['data'][0].get('totalEq','0')
-            return float(eq), data
-        else:
-            return None, data
+        r = requests.post("https://api.fonnte.com/send",
+            headers={"Authorization": FONNTE_TOKEN},
+            data={"target": WA_TARGET, "message": pesan, "countryCode": "62"},
+            timeout=15)
+        print(f"[WA] {r.status_code} {pesan[:50]}", flush=True)
     except Exception as e:
-        traceback.print_exc()
-        return None, str(e)
+        print(f"[WA FAIL] {e}", flush=True)
 
+# ============ INDIKATOR ============
+def ema(d, p):
+    k = 2 / (p + 1); e = d[0]
+    for x in d[1:]: e = x * k + e * (1 - k)
+    return e
+
+def rsi_14(closes, period=14):
+    if len(closes) < period+1: return 50
+    gains = losses = 0.0
+    for i in range(1, period+1):
+        chg = closes[-i] - closes[-i-1]
+        if chg >= 0: gains += chg
+        else: losses -= chg
+    if losses == 0: return 100.0
+    rs = (gains / period) / (losses / period)
+    return 100 - 100 / (1 + rs)
+
+def atr_14(ohlcv, period=14):
+    trs = []
+    for i in range(1, len(ohlcv)):
+        h, l, pc = ohlcv[i][2], ohlcv[i][3], ohlcv[i-1][4]
+        trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+    return sum(trs[-period:]) / period
+
+# ============ EXCHANGE ============
+print(f"🔴 NEOBRO V13 NEW LOGIC - KEY LEN {len(API_KEY)}", flush=True)
 exchange = ccxt.okx({
     'apiKey': API_KEY, 'secret': API_SECRET, 'password': PASSPHRASE,
-    'enableRateLimit': True,
-    'options': {'defaultType': 'swap'}
+    'enableRateLimit': True, 'options': {'defaultType': 'swap'},
 })
-exchange.options['fetchCurrencies'] = False
+# BYPASS - ini yang bikin lu error 2 jam tadi
 exchange.has['fetchCurrencies'] = False
 exchange.fetch_currencies = lambda *a, **k: {}
-exchange.fetchCurrencies = lambda *a, **k: {}
 exchange.publicGetAssetCurrencies = lambda *a, **k: {'code':'0','data':[]}
-exchange.privateGetAssetCurrencies = lambda *a, **k: {'code':'0','data':[]}
-
-print("=== NEOBRO V12.2 BYPASS ===", flush=True)
-
-bal_val, raw = get_okx_balance_direct()
-if bal_val is not None:
-    print(f"SALDO OK: {bal_val}", flush=True)
-    send_wa(f"BOT V12.2 ON SALDO {bal_val}")
-else:
-    print(f"BALANCE ERR DETAIL: {raw}", flush=True)
-    print("LANJUT TRADING...", flush=True)
-
-def get_ema(closes, period):
-    k = 2/(period+1)
-    ema = sum(closes[:period])/period
-    for c in closes[period:]:
-        ema = c*k + ema*(1-k)
-    return ema
 
 def set_lev(sym):
     try: exchange.set_position_mode(True)
-    except: pass
-    try:
-        exchange.set_leverage(LEV, sym, {'mgnMode':'isolated','posSide':'long'})
-        exchange.set_leverage(LEV, sym, {'mgnMode':'isolated','posSide':'short'})
-    except: pass
+    except Exception: pass
+    for ps in ('long','short'):
+        try: exchange.set_leverage(LEV, sym, {'mgnMode':'isolated','posSide':ps})
+        except Exception: pass
 
-pos={}
-while True:
-    for sym in SYMBOLS:
+CT_VAL = {}
+def qty_contracts(sym, notional_usd):
+    if sym not in CT_VAL:
         try:
-            ohlcv=exchange.fetch_ohlcv(sym,'5m',limit=100)
-            closes=[c[4] for c in ohlcv]
-            price=closes[-1]
-            e20=get_ema(closes,20)
-            e50=get_ema(closes,50)
-            pe20=get_ema(closes[:-1],20)
-            pe50=get_ema(closes[:-1],50)
-            name=sym.split('/')[0]
-            cur=pos.get(name)
-            qty=max(1, int(round((MARGIN*LEV)/price))-1)
-            if e20>e50 and pe20<=pe50 and cur!='long':
-                print(f"LONG {name} {price}", flush=True)
-                send_wa(f"LONG {name} {price}")
-                set_lev(sym)
-                inst=name+"-USDT-SWAP"
-                if cur=='short':
-                    exchange.private_post_trade_order({'instId':inst,'tdMode':'isolated','side':'buy','posSide':'short','ordType':'market','sz':str(qty)})
-                exchange.private_post_trade_order({'instId':inst,'tdMode':'isolated','side':'buy','posSide':'long','ordType':'market','sz':str(qty)})
-                pos[name]='long'
-            elif e20<e50 and pe20>=pe50 and cur!='short':
-                print(f"SHORT {name} {price}", flush=True)
-                send_wa(f"SHORT {name} {price}")
-                set_lev(sym)
-                inst=name+"-USDT-SWAP"
-                if cur=='long':
-                    exchange.private_post_trade_order({'instId':inst,'tdMode':'isolated','side':'sell','posSide':'long','ordType':'market','sz':str(qty)})
-                exchange.private_post_trade_order({'instId':inst,'tdMode':'isolated','side':'sell','posSide':'short','ordType':'market','sz':str(qty)})
-                pos[name]='short'
+            m = exchange.market(sym)
+            CT_VAL[sym] = float(m['info'].get('ctVal', 1))
+            CT_VAL[sym+"_price"] = float(m['info'].get('ctValCcy', 1)) # fallback
+        except: CT_VAL[sym]=1
+    # OKX: 1 contract = ctVal * price. ctVal untuk LIT dll = 1
+    return max(1, int(notional_usd))
+
+def open_order(sym, side, posSide, qty, atr, price):
+    inst = sym.split(':')[0].replace('/','-') + '-USDT-SWAP'
+    sl = price - 1.5*atr if side=='buy' else price + 1.5*atr
+    tp = price + 2.0*atr if side=='buy' else price - 2.0*atr
+    try:
+        # 1. entry market
+        exchange.create_order(sym, 'market', qty, None, {
+            'instId': inst, 'tdMode': 'isolated', 'side': side,
+            'posSide': posSide, 'ordType': 'market'})
+        print(f"✅ ENTRY {posSide} {sym} {qty} @ {price}", flush=True)
+        send_wa(f"{'🟢 LONG' if posSide=='long' else '🔴 SHORT'} {sym.split('/')[0]} @ {price}\nSL {sl:.4f} TP {tp:.4f} ATR {atr:.4f}")
+
+        # 2. SL/TP algo (opsional, kalau gagal entry tetep jalan)
+        try:
+            exchange.private_post_trade_order_algo({
+                'instId': inst, 'tdMode': 'isolated', 'side': 'sell' if side=='buy' else 'buy',
+                'posSide': posSide, 'ordType': 'conditional',
+                'sz': str(qty), 'tpTriggerPx': str(tp), 'tpOrdPx': '-1',
+                'slTriggerPx': str(sl), 'slOrdPx': '-1'
+            })
         except Exception as e:
-            print(f"[ERR] {sym}: {e}", flush=True)
-    time.sleep(60)
+            print(f"[SLTP WARN] {e}", flush=True)
+
+    except Exception as e:
+        msg = f"🚨 ORDER FAIL {sym} {posSide}: {e}"
+        print(msg, flush=True); send_wa(msg); raise
+
+def get_signal(sym):
+    try:
+        h1_ = exchange.fetch_ohlcv(sym, '1h', limit=200)
+        ch  = [x[4] for x in h1_]
+        bias = 'long' if ema(ch,50) > ema(ch,200) else 'short'
+
+        m5_ = exchange.fetch_ohlcv(sym, '5m', limit=100)
+        c5  = [x[4] for x in m5_]
+        v5  = [x[5] for x in m5_]
+        e20, e50 = ema(c5,20), ema(c5,50)
+        rsi, atr = rsi_14(c5), atr_14(m5_)
+        vol_up   = v5[-1] > v5[-2] * 1.2
+
+        long_ok  = bias=='long' and e20>e50 and 40<rsi<55 and vol_up
+        short_ok = bias=='short' and e20<e50 and 45<rsi<60 and vol_up
+        sig = 'long' if long_ok else 'short' if short_ok else None
+        return sig, atr, bias, rsi, e20, e50
+    except Exception as e:
+        print(f"[SIGNAL ERR {sym}] {e}", flush=True)
+        return None, 0, None, 0, 0, 0
+
+# ============ MAIN ============
+daily_pnl, pos = 0.0, {}
+try:
+    bal = exchange.fetch_balance()
+    print(f"SALDO OK: {bal.get('total',{}).get('USDT',0)}", flush=True)
+    send_wa(f"🤖 NEOBRO V13 ON\nSaldo Trading: {bal.get('total',{}).get('USDT',0)} USDT")
+except Exception as e:
+    print(f"BALANCE ERR: {e}", flush=True)
+    send_wa(f"🚨 BALANCE ERR: {e}")
+
+while True:
+    try:
+        for sym in SYMBOLS:
+            name = sym.split('/')[0]
+            signal, atr, bias, rsi, e20, e50 = get_signal(sym)
+            if not signal: continue
+            if pos.get(name) == signal: continue
+
+            price = exchange.fetch_ticker(sym)['last']
+            qty   = qty_contracts(sym, MARGIN * LEV / price * 100) # approx
+            if qty < 1: qty = 1
+
+            print(f"[SCAN] {name} bias:{bias} sig:{signal} rsi:{rsi:.1f} {e20:.4f}/{e50:.4f} atr:{atr:.4f}", flush=True)
+
+            set_lev(sym)
+            if signal == 'long':
+                if pos.get(name) == 'short':
+                    open_order(sym,'buy','short',qty,atr,price)
+                open_order(sym,'buy','long',qty,atr,price)
+                pos[name]='long'
+            elif signal == 'short':
+                if pos.get(name) == 'long':
+                    open_order(sym,'sell','long',qty,atr,price)
+                open_order(sym,'sell','short',qty,atr,price)
+                pos[name]='short'
+
+        time.sleep(30)
+    except Exception as e:
+        print(f"[LOOP ERR] {e}", flush=True)
+        time.sleep(10)
