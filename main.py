@@ -1,5 +1,4 @@
-import os, time, ccxt
-
+import os, time, ccxt, requests
 MARGIN = 5.0
 LEV = 8
 SYMBOLS = ["LIT/USDT:USDT","ONDO/USDT:USDT","SUI/USDT:USDT","ASTER/USDT:USDT","SOL/USDT:USDT"]
@@ -8,7 +7,13 @@ SYMBOLS = ["LIT/USDT:USDT","ONDO/USDT:USDT","SUI/USDT:USDT","ASTER/USDT:USDT","S
 API_KEY = (os.getenv("OKX_API_KEY") or "").strip()
 API_SECRET = (os.getenv("OKX_API_SECRET") or "").strip()
 PASSPHRASE = (os.getenv("OKX_PASSPHRASE") or "").strip()
-
+def send_wa_alert(pesan):
+    try:
+        requests.post("https://api.fonnte.com/send",
+            headers={"Authorization": (os.getenv("FONNTE_TOKEN") or "").strip()},
+            data={"target": (os.getenv("FONNTE_TARGET") or "").strip(), "message": pesan, "countryCode": "62"},
+            timeout=10)
+    except: pass
 exchange = ccxt.okx({
     'apiKey': API_KEY,
     'secret': API_SECRET,
@@ -85,5 +90,6 @@ while True:
                 pos[name]='short'
 
         except Exception as e:
-            print(f"[ERR] {sym}: {e}", flush=True)
+    print(f"[ERR] {sym}: {e}", flush=True)
+    send_wa_alert(f"🚨 FAIL {sym}: {e}")
     time.sleep(60)
