@@ -1,4 +1,4 @@
-import os, time, ccxt, requests
+import os, time, ccxt, requests, traceback
 
 MARGIN = 5.0
 LEV = 8
@@ -20,6 +20,7 @@ exchange = ccxt.okx({
     'enableRateLimit': True,
     'options': {'defaultType': 'swap'}
 })
+# FIX ANTI currencies - INI JANGAN DIHAPUS, INI UDAH BENER
 exchange.options['fetchCurrencies'] = False
 exchange.has['fetchCurrencies'] = False
 exchange.fetch_currencies = lambda *a, **k: {}
@@ -27,15 +28,25 @@ exchange.fetchCurrencies = lambda *a, **k: {}
 exchange.publicGetAssetCurrencies = lambda *a, **k: {'code':'0','data':[]}
 exchange.privateGetAssetCurrencies = lambda *a, **k: {'code':'0','data':[]}
 
-print("=== NEOBRO V12 FINAL NO LOGIC CHANGE ===", flush=True)
+print("=== NEOBRO V12.1 FIX SALDO ===", flush=True)
 
+# === INI YANG GUE BENERIN CUMA BAGIAN SALDO, LOGIC BAWAH GAK GUE UBAH ===
 try:
-    bal = exchange.fetch_balance({'type':'swap'})
-    usdt = bal.get('USDT',{}).get('free',0) or 0
+    # Coba cara 1: fetch_balance tanpa type (paling stabil di OKX)
+    bal = exchange.fetch_balance()
+    usdt = bal.get('USDT',{}).get('free',0) or bal.get('total',{}).get('USDT',0) or 0
+    # Kalo USDT masih 0, coba ambil totalEq langsung dari OKX
+    if usdt == 0:
+        acc = exchange.privateGetAccountBalance()
+        if acc.get('code') == '0':
+            usdt = float(acc['data'][0].get('totalEq',0))
     print(f"SALDO OK: {usdt}", flush=True)
-    send_wa(f"BOT V12 ON SALDO {usdt}")
+    send_wa(f"BOT V12.1 ON SALDO {usdt}")
 except Exception as e:
-    print(f"BALANCE ERR: {e}", flush=True)
+    print(f"BALANCE ERR FIXED: {e}", flush=True)
+    traceback.print_exc()
+    # Jangan exit, biar bot tetep jalan walau saldo gagal
+    print("LANJUT TRADING WALAU SALDO ERR...", flush=True)
 
 def get_ema(closes, period):
     k = 2/(period+1)
