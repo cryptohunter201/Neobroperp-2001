@@ -1,4 +1,5 @@
-import os, time, ccxt, requests, traceback
+import os, time, ccxt, requests, traceback, hmac, base64, hashlib, json
+from datetime import datetime, timezone
 
 MARGIN = 5.0
 LEV = 8
@@ -15,12 +16,44 @@ def send_wa(msg):
     try: requests.post("https://api.fonnte.com/send", headers={"Authorization": FONNTE_TOKEN}, data={"target": WA_TARGET, "message": msg}, timeout=10)
     except: pass
 
+# === FUNGSI CEK SALDO LANGSUNG KE OKX (ANTI CCXT ERROR) ===
+def get_okx_balance_direct():
+    try:
+        method = "GET"
+        request_path = "/api/v5/account/balance"
+        body = ""
+        timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        # OKX butuh format 2025-10-19T07:00:00.000Z
+        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+        message = timestamp + method + request_path + body
+        mac = hmac.new(API_SECRET.encode('utf-8'), message.encode('utf-8'), hashlib.sha256)
+        sign = base64.b64encode(mac.digest()).decode('utf-8')
+        
+        headers = {
+            "OK-ACCESS-KEY": API_KEY,
+            "OK-ACCESS-SIGN": sign,
+            "OK-ACCESS-TIMESTAMP": timestamp,
+            "OK-ACCESS-PASSPHRASE": PASSPHRASE,
+            "Content-Type": "application/json"
+        }
+        print(f"DEBUG KEY:{API_KEY[:5]}... PASS LEN:{len(PASSPHRASE)}", flush=True)
+        r = requests.get(f"https://www.okx.com{request_path}", headers=headers, timeout=10)
+        print(f"OKX RAW: {r.status_code} {r.text[:300]}", flush=True)
+        data = r.json()
+        if data.get('code') == '0':
+            eq = data['data'][0].get('totalEq','0')
+            return float(eq), data
+        else:
+            return None, data
+    except Exception as e:
+        traceback.print_exc()
+        return None, str(e)
+
 exchange = ccxt.okx({
     'apiKey': API_KEY, 'secret': API_SECRET, 'password': PASSPHRASE,
     'enableRateLimit': True,
     'options': {'defaultType': 'swap'}
 })
-# FIX ANTI currencies - INI JANGAN DIHAPUS, INI UDAH BENER
 exchange.options['fetchCurrencies'] = False
 exchange.has['fetchCurrencies'] = False
 exchange.fetch_currencies = lambda *a, **k: {}
@@ -28,25 +61,15 @@ exchange.fetchCurrencies = lambda *a, **k: {}
 exchange.publicGetAssetCurrencies = lambda *a, **k: {'code':'0','data':[]}
 exchange.privateGetAssetCurrencies = lambda *a, **k: {'code':'0','data':[]}
 
-print("=== NEOBRO V12.1 FIX SALDO ===", flush=True)
+print("=== NEOBRO V12.2 BYPASS ===", flush=True)
 
-# === INI YANG GUE BENERIN CUMA BAGIAN SALDO, LOGIC BAWAH GAK GUE UBAH ===
-try:
-    # Coba cara 1: fetch_balance tanpa type (paling stabil di OKX)
-    bal = exchange.fetch_balance()
-    usdt = bal.get('USDT',{}).get('free',0) or bal.get('total',{}).get('USDT',0) or 0
-    # Kalo USDT masih 0, coba ambil totalEq langsung dari OKX
-    if usdt == 0:
-        acc = exchange.privateGetAccountBalance()
-        if acc.get('code') == '0':
-            usdt = float(acc['data'][0].get('totalEq',0))
-    print(f"SALDO OK: {usdt}", flush=True)
-    send_wa(f"BOT V12.1 ON SALDO {usdt}")
-except Exception as e:
-    print(f"BALANCE ERR FIXED: {e}", flush=True)
-    traceback.print_exc()
-    # Jangan exit, biar bot tetep jalan walau saldo gagal
-    print("LANJUT TRADING WALAU SALDO ERR...", flush=True)
+bal_val, raw = get_okx_balance_direct()
+if bal_val is not None:
+    print(f"SALDO OK: {bal_val}", flush=True)
+    send_wa(f"BOT V12.2 ON SALDO {bal_val}")
+else:
+    print(f"BALANCE ERR DETAIL: {raw}", flush=True)
+    print("LANJUT TRADING...", flush=True)
 
 def get_ema(closes, period):
     k = 2/(period+1)
@@ -77,7 +100,6 @@ while True:
             name=sym.split('/')[0]
             cur=pos.get(name)
             qty=max(1, int(round((MARGIN*LEV)/price))-1)
-
             if e20>e50 and pe20<=pe50 and cur!='long':
                 print(f"LONG {name} {price}", flush=True)
                 send_wa(f"LONG {name} {price}")
