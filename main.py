@@ -3,10 +3,10 @@ MARGIN = 5.0
 LEV = 8
 SYMBOLS = ["LIT/USDT:USDT","ONDO/USDT:USDT","SUI/USDT:USDT","ASTER/USDT:USDT","SOL/USDT:USDT"]
 
-# STRIP biar gak ada spasi nyangkut kayak di foto 18:34 tadi
 API_KEY = (os.getenv("OKX_API_KEY") or "").strip()
 API_SECRET = (os.getenv("OKX_API_SECRET") or "").strip()
 PASSPHRASE = (os.getenv("OKX_PASSPHRASE") or "").strip()
+
 def send_wa_alert(pesan):
     try:
         requests.post("https://api.fonnte.com/send",
@@ -14,6 +14,7 @@ def send_wa_alert(pesan):
             data={"target": (os.getenv("FONNTE_TARGET") or "").strip(), "message": pesan, "countryCode": "62"},
             timeout=10)
     except: pass
+
 exchange = ccxt.okx({
     'apiKey': API_KEY,
     'secret': API_SECRET,
@@ -22,7 +23,6 @@ exchange = ccxt.okx({
     'options': {'defaultType': 'swap'},
 })
 
-# BLOKIR 2 biang kerok yg bikin error dari pagi
 exchange.has['fetchCurrencies'] = False
 exchange.fetch_currencies = lambda *a, **k: {}
 exchange.publicGetAssetCurrencies = lambda *a, **k: {'code':'0','data':[]}
@@ -37,7 +37,7 @@ def set_lev(sym):
 
 def safe_order(sym, side, posSide, qty):
     instId = sym.split('/')[0] + '-USDT-SWAP'
-    qty = max(1, int(qty)-1) # buffer fee biar $5 gak mepet
+    qty = max(1, int(qty)-1)
     for mode in ['hedge','net']:
         try:
             p = {'instId': instId, 'tdMode': 'isolated', 'side': side, 'ordType': 'market', 'sz': str(qty)}
@@ -63,8 +63,6 @@ try:
     print(f"SALDO OK: {bal.get('USDT',{})}", flush=True)
 except Exception as e:
     print(f"BALANCE ERR: {e}", flush=True)
-    print(f"OKX DETAIL: {getattr(exchange,'last_json_response','no response')}", flush=True)
-    print(">>> CEK IP WHITELIST OKX, GANTI JADI 0.0.0.0/0 <<<", flush=True)
 
 pos = {}
 while True:
@@ -90,6 +88,6 @@ while True:
                 pos[name]='short'
 
         except Exception as e:
-    print(f"[ERR] {sym}: {e}", flush=True)
-    send_wa_alert(f"🚨 FAIL {sym}: {e}")
-    time.sleep(60)
+            print(f"[ERR] {sym}: {e}", flush=True)
+            send_wa_alert(f"🚨 FAIL {sym}: {e}")
+            time.sleep(60)
