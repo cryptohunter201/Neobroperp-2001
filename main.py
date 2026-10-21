@@ -48,7 +48,7 @@ def get_signal(sym):
     short_ok=bias=='short' and e20<e50 and 45<rsi<60 and vol_up
     return ('long' if long_ok else 'short' if short_ok else None), atr
 
-print("🔴 NEOBRO V13.3 FIX SIDE + ETH", flush=True)
+print("🟢 NEOBRO V13.4 FIX INSTRUMENT - ANTI 51001", flush=True)
 pos={}
 while True:
     try:
@@ -61,30 +61,32 @@ while True:
             name=sym.split('/')[0]; sig,atr=get_signal(sym)
             if not sig or pos.get(name)==sig: continue
             price=exchange.fetch_ticker(sym)['last']
-            # qty kontrak: OKX minimal 1
-            qty=max(1,int(MARGIN*LEV/price*10) if price>10 else int(MARGIN*LEV))
+            
+            # qty fix - biar gak kegedean di coin murah
+            qty = max(1, int((MARGIN * LEV) / price)) if price > 1 else 20
+            if name in ["LIT","ONDO"]: qty = max(1, qty) 
+            
             set_lev(sym)
             
-            # FIX UTAMA DISINI
+            # FIX FINAL: Jangan kirim instId manual, biar ccxt yang handle
             side = 'buy' if sig=='long' else 'sell'
             posSide = sig
-            instId = sym.split(':')[0].replace('/','-') + '-USDT-SWAP'
             
-            # format ccxt yang bener: symbol, type, side, amount, price, params
             exchange.create_order(sym, 'market', side, qty, None, {
-                'instId': instId,
                 'tdMode': 'isolated',
-                'posSide': posSide,
-                'ordType': 'market'
+                'posSide': posSide
             })
             
             pos[name]=sig
-            msg=f"{'🟢 LONG' if sig=='long' else '🔴 SHORT'} {name} @ {price} qty {qty} ATR {atr:.4f}"
+            msg=f"{'🟢 LONG' if sig=='long' else '🔴 SHORT'} {name} @ {price} qty {qty}"
             print(msg, flush=True); send_wa(msg)
 
     except Exception as e:
-        print(f"[ERR] {e}", flush=True)
-        if '51000' not in str(e) and '51008' not in str(e): # jangan spam WA kalo cuma saldo
-            send_wa(f"🚨 FAIL: {str(e)[:200]}")
+        err=str(e)
+        print(f"[ERR] {err[:300]}", flush=True)
+        if '51001' in err:
+            print(">> FIX: Instrument double USDT, sudah dihapus di V13.4", flush=True)
+        if '51000' not in err and '51008' not in err and '51001' not in err:
+            send_wa(f"🚨 FAIL: {err[:200]}")
         time.sleep(5)
     time.sleep(30)
